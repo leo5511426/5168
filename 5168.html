@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>力文影印 - 智慧收銀系統</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <style>
+        :root { --primary: #4e73df; --secondary: #858796; --success: #1cc88a; --danger: #e74a3b; --dark-bg: #1a202c; --light-bg: #f8f9fc; }
+        body { background-color: var(--light-bg); font-family: 'Noto Sans TC', sans-serif; color: #333; }
+        .navbar-custom { background: linear-gradient(90deg, var(--dark-bg) 0%, #2c3e50 100%); box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 15px 20px; }
+        .glass-panel { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1); border: 1px solid #e3e6f0; margin-bottom: 20px; }
+        .table-card { background: white; border-radius: 12px; box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1); overflow: hidden; border: 1px solid #e3e6f0; }
+        .table-custom thead th { background-color: #f8f9fc; color: var(--secondary); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px; border-bottom: 2px solid #e3e6f0; padding: 15px; }
+        .table-custom tbody td { padding: 15px; vertical-align: middle; border-bottom: 1px solid #edf2f9; }
+        .table-custom tbody tr:hover { background-color: #f1f8ff; }
+        .status-paid { opacity: 0.6; background-color: #f8f9fa !important; pointer-events: none; }
+        .status-paid td { text-decoration: line-through; color: #999; }
+        .badge-ricoh { background-color: #5a5c69; font-size: 0.85rem; padding: 6px 10px; }
+        .badge-fuji { background-color: #4e73df; font-size: 0.85rem; padding: 6px 10px; }
+        .badge-manual { background-color: #f6c23e; color: #333; font-size: 0.85rem; padding: 6px 10px; }
+        .btn-checkout { background: linear-gradient(180deg, #1cc88a 0%, #13855c 100%); color: white; border: none; font-weight: 700; padding: 6px 16px; border-radius: 8px; transition: 0.2s; box-shadow: 0 2px 4px rgba(28,200,138,0.3); }
+        .btn-checkout:hover { transform: scale(1.05); color: white; }
+        .icon-pdf { color: #e74a3b; } .icon-word { color: #4e73df; } .icon-default { color: #858796; } .icon-manual { color: #f6c23e; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.85); z-index: 9999; display: none; flex-direction: column; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
+        
+        .tx-row { cursor: pointer; transition: background 0.2s; }
+        .tx-row:hover { background-color: #e2e8f0 !important; }
+        .tx-status-cancelled { text-decoration: line-through; color: #999; }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
+        <h5 class="mt-3 text-primary fw-bold">處理中，請稍候...</h5>
+    </div>
+
+    <nav class="navbar navbar-dark navbar-custom mb-4">
+        <div class="container-fluid px-3">
+            <span class="navbar-brand mb-0 h1 fs-4 fw-bold">
+                <i class="fa-solid fa-print me-2 text-info"></i>力文影印 <span class="fw-normal fs-6 text-white-50">｜智慧收銀系統</span>
+            </span>
+            <div>
+                <span id="sync-time" class="text-white-50 me-3 fs-6"><i class="fa-regular fa-clock me-1"></i>尚未同步</span>
+                <button class="btn btn-outline-info btn-sm fw-bold rounded-pill px-3 me-2" onclick="openTransactionModal()">
+                    <i class="fa-solid fa-file-invoice-dollar me-1"></i> 交易紀錄
+                </button>
+                <button class="btn btn-outline-light btn-sm fw-bold rounded-pill px-3" onclick="openAdminPanel()">
+                    <i class="fa-solid fa-gear me-1"></i> 管理員
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+        <div class="glass-panel d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div class="d-flex gap-4 align-items-center flex-wrap">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label fw-bold mb-0 text-secondary"><i class="fa-solid fa-server me-1"></i>機台</label>
+                    <select id="filter-machine" class="form-select form-select-sm shadow-none border-secondary-subtle fw-bold text-dark" style="width: 250px;" onchange="playSound('info'); renderTableUI();">
+                        <option value="all">顯示全部</option>
+                        <option value="黑白1(RICOH Aficio MP 7001)">黑白1 (MP 7001)</option>
+                        <option value="黑白2(RICOH Aficio MP 7502)">黑白2 (MP 7502)</option>
+                        <option value="彩色(ApeosPort-V C3376)">彩色機 (C3376)</option>
+                        <option value="Manual">手動前台項目</option>
+                    </select>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label fw-bold mb-0 text-secondary"><i class="fa-solid fa-filter me-1"></i>時間</label>
+                    <select id="filter-time" class="form-select form-select-sm shadow-none border-secondary-subtle fw-bold text-dark" style="width: 140px;" onchange="playSound('info'); renderTableUI();">
+                        <option value="all">所有紀錄</option>
+                        <option value="today">今日紀錄</option>
+                        <option value="hour">過去 1 小時</option>
+                    </select>
+                </div>
+                <button class="btn btn-sm btn-light border shadow-sm fw-bold text-primary" onclick="playSound('info'); fetchLogsFromGAS(true);">
+                    <i class="fa-solid fa-rotate-right me-1"></i>重整雲端
+                </button>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary fw-bold px-3 py-2 rounded-pill bg-white shadow-sm" onclick="manualAddLog()">
+                    <i class="fa-solid fa-plus me-1 text-warning"></i>手動新增
+                </button>
+                <button class="btn btn-primary fw-bold px-4 py-2 rounded-pill shadow-sm" onclick="processBatchCheckout()">
+                    <i class="fa-solid fa-cash-register me-2"></i>多選合併結帳
+                </button>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <div class="table-responsive">
+                <table class="table table-custom align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-center" style="width: 60px;"><input class="form-check-input fs-5 shadow-none" type="checkbox" id="selectAll" onclick="playSound('info'); toggleSelectAll();"></th>
+                            <th style="width: 160px;">時間</th>
+                            <th style="width: 200px;">來源機台</th>
+                            <th>檔案資訊 / 項目</th>
+                            <th class="text-center" style="width: 110px;">面數(單份)</th>
+                            <th class="text-center" style="width: 100px;">狀態</th>
+                            <th class="text-center" style="width: 120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-body"></tbody>
+                </table>
+            </div>
+            <div id="empty-state" class="text-center py-5 d-none">
+                <i class="fa-solid fa-inbox text-black-50 mb-3" style="font-size: 4rem; opacity: 0.3;"></i>
+                <h5 class="text-secondary fw-bold">目前沒有符合的紀錄</h5>
+            </div>
+        </div>
+    </div>
+
+    <!-- 交易紀錄 Modal -->
+    <div class="modal fade" id="transactionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-light border-bottom-0">
+                    <h5 class="modal-title fw-bold text-primary"><i class="fa-solid fa-list-check me-2"></i>交易總表</h5>
+                    <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light text-secondary small">
+                                <tr>
+                                    <th class="ps-4">交易單號</th>
+                                    <th>日期時間</th>
+                                    <th>項目摘要</th>
+                                    <th>機台編號</th>
+                                    <th class="text-end">應收總計</th>
+                                    <th class="text-center pe-4">狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transaction-list-body">
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-top-0">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">關閉</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 交易明細 Modal -->
+    <div class="modal fade" id="txDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white border-bottom-0">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-receipt me-2"></i>列印明細 - <span id="detail-tx-id"></span></h5>
+                    <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive mb-3 border rounded shadow-sm">
+                        <table class="table table-sm table-striped align-middle text-start mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>紙張尺寸</th>
+                                    <th>色彩類型</th>
+                                    <th>單雙面</th>
+                                    <th class="text-center">單份頁數</th>
+                                    <th class="text-center">列印份數</th>
+                                    <th class="text-center">總面數</th>
+                                    <th class="text-end">小計金額</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tx-detail-body">
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border shadow-sm mb-4">
+                        <span class="fs-5 fw-bold text-secondary">總計金額</span>
+                        <span class="display-6 fw-bold text-danger" id="detail-total-amount"></span>
+                    </div>
+                    
+                    <div id="tx-actions" class="d-flex justify-content-end gap-2 border-top pt-3">
+                        <button class="btn btn-outline-warning fw-bold" onclick="cancelTransaction(false)">
+                            <i class="fa-solid fa-ban me-1"></i> 僅取消不退款 (註銷)
+                        </button>
+                        <button class="btn btn-danger fw-bold" onclick="cancelTransaction(true)">
+                            <i class="fa-solid fa-money-bill-transfer me-1"></i> 取消並退款 (刪除)
+                        </button>
+                    </div>
+                    <div id="tx-cancelled-alert" class="alert alert-warning text-center fw-bold d-none mb-0">
+                        此交易已作廢 / 取消
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ================= 1. 設定區與變數 =================
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbwhWhHlwYYqdHV2AzQcvPpJoK7KoRfne4raHu-FA-FWCoc6Npawwb24DAvEfkfhEI1yrw/exec"; 
+        const IS_TEST_MODE = false;
+
+        let priceConfig = JSON.parse(localStorage.getItem('priceConfig')) || {
+            a4_bw: 1, a4_bw_disc: 0.5, b5_bw: 1, b4_bw: 1, a3_bw: 1,
+            a4_color: 5, b5_color: 5, b4_color: 10, a3_color: 10
+        };
+
+        let fetchedCloudLogs = []; 
+        let manualLocalLogs = JSON.parse(localStorage.getItem('manualLocalLogs')) || []; 
+        let currentLogs = []; 
+        let checkedOutIds = JSON.parse(localStorage.getItem('checkedOutIds')) || [];
+        
+        let transactionHistory = []; // 改為直接從雲端抓取
+        let currentViewingTx = null;
+
+        // ================= 2. 🔊 全域音效引擎 =================
+        let audioCtx; 
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return audioCtx;
+        }
+
+        function playTone(ctx, freq, type, startTime, duration, vol) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(vol, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+        }
+
+        function playSound(type) {
+            try {
+                const ctx = initAudio();
+                const now = ctx.currentTime;
+                if (type === 'success') { playTone(ctx, 880, 'sine', now, 0.1, 0.1); playTone(ctx, 1318.51, 'sine', now + 0.12, 0.15, 0.1); } 
+                else if (type === 'info') { playTone(ctx, 1000, 'sine', now, 0.05, 0.05); } 
+                else if (type === 'warning') { playTone(ctx, 440, 'square', now, 0.15, 0.05); } 
+                else if (type === 'error') { playTone(ctx, 150, 'sawtooth', now, 0.3, 0.1); playTone(ctx, 100, 'sawtooth', now + 0.15, 0.3, 0.1); }
+            } catch (e) {}
+        }
+
+        // ================= 3. 系統初始化與輔助函數 =================
+        window.onload = () => {
+            fetchLogsFromGAS(true);
+            setInterval(() => fetchLogsFromGAS(false), 60000); 
+        };
+
+        function showLoading(show) { document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; }
+
+        function getFileIcon(filename, machine) {
+            if (machine === "Manual") return '<i class="fa-solid fa-pen-to-square icon-manual fs-4"></i>';
+            const ext = filename.split('.').pop().toLowerCase();
+            if (ext === 'pdf') return '<i class="fa-solid fa-file-pdf icon-pdf fs-4"></i>';
+            if (ext === 'doc' || ext === 'docx') return '<i class="fa-solid fa-file-word icon-word fs-4"></i>';
+            return '<i class="fa-solid fa-file-lines icon-default fs-4"></i>';
+        }
+
+        function formatLocalTime(utcString) {
+            const date = new Date(utcString);
+            if (isNaN(date)) return utcString; 
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            const hh = String(date.getHours()).padStart(2, '0');
+            const min = String(date.getMinutes()).padStart(2, '0');
+            return `<div class="fw-bold">${mm}/${dd}</div><div class="small text-muted">${hh}:${min}</div>`;
+        }
+        
+        function formatFullTime(utcString) {
+            const date = new Date(utcString);
+            if (isNaN(date)) return utcString;
+            return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        }
+
+        function generateTransactionId() {
+            const now = new Date();
+            return 'TX' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0') + String(now.getSeconds()).padStart(2,'0') + Math.floor(Math.random()*100);
+        }
+
+        // ================= 4. 手動新增 =================
+        async function manualAddLog() {
+            playSound('info'); 
+            const { value: formValues } = await Swal.fire({
+                title: '<i class="fa-solid fa-pen-to-square text-warning me-2"></i>手動新增前台項目',
+                html: `
+                    <div class="text-start fs-6 p-1">
+                        <div class="mb-3"><label class="form-label fw-bold text-secondary">服務項目/檔名</label><input id="m-file" class="form-control" value="手動列印"></div>
+                        <div class="row mb-3">
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">色彩</label><select id="m-color" class="form-select"><option value="BW" selected>⚫ 黑白</option><option value="COLOR">🌈 彩色</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">尺寸</label><select id="m-size" class="form-select"><option value="A4" selected>A4</option><option value="B5">B5</option><option value="B4">B4</option><option value="A3">A3</option></select></div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">排版</label><select id="m-sides" class="form-select"><option value="Simplex" selected>單面</option><option value="Duplex">雙面</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">機台</label><select id="m-machine" class="form-select"><option value="Manual" selected>一般雜項</option><option value="黑白1(RICOH Aficio MP 7001)">黑白1</option><option value="黑白2(RICOH Aficio MP 7502)">黑白2</option><option value="彩色(ApeosPort-V C3376)">彩色機</option></select></div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">單份面數</label><input id="m-pages" type="number" class="form-control" value="1" min="1"></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">份數</label><input id="m-copies" type="number" class="form-control" value="1" min="1"></div>
+                        </div>
+                    </div>
+                `,
+                showCancelButton: true, confirmButtonColor: '#f6c23e', confirmButtonText: '加入', cancelButtonText: '取消', focusConfirm: false,
+                preConfirm: () => {
+                    return {
+                        file: document.getElementById('m-file').value || '未命名項目',
+                        machine: document.getElementById('m-machine').value, color: document.getElementById('m-color').value,
+                        size: document.getElementById('m-size').value, sides: document.getElementById('m-sides').value,
+                        pages: parseInt(document.getElementById('m-pages').value) || 1, copies: parseInt(document.getElementById('m-copies').value) || 1
+                    }
+                }
+            });
+
+            if (formValues) {
+                playSound('success'); 
+                const now = new Date();
+                const newLog = {
+                    global_id: "Manual_" + now.getTime(), machine_id: formValues.machine, user_name: "前台建立", file_name: formValues.file, 
+                    date_time: now.toISOString(), pages: formValues.pages, status: "前台設定",
+                    config: { color: formValues.color, size: formValues.size, sides: formValues.sides, copies: formValues.copies }
+                };
+                manualLocalLogs.unshift(newLog); 
+                localStorage.setItem('manualLocalLogs', JSON.stringify(manualLocalLogs));
+                renderTableUI();
+            }
+        }
+
+        // ================= 5. 雲端同步 =================
+        async function fetchLogsFromGAS(showSpinner = false) {
+            if (showSpinner) showLoading(true);
+            try {
+                if (IS_TEST_MODE) {
+                    await new Promise(r => setTimeout(r, 500));
+                    fetchedCloudLogs = [];
+                } else {
+                    const response = await fetch(`${GAS_URL}?action=get_logs`);
+                    if (!response.ok) throw new Error(`伺服器錯誤: ${response.status}`);
+                    fetchedCloudLogs = JSON.parse(await response.text()) || []; 
+                }
+                const now = new Date();
+                document.getElementById('sync-time').innerHTML = `<i class="fa-solid fa-check-circle text-success me-1"></i>最後同步: ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                renderTableUI();
+                if (showSpinner) playSound('success'); 
+            } catch (e) {
+                playSound('error'); 
+            } finally {
+                if (showSpinner) showLoading(false);
+            }
+        }
+
+        function renderTableUI() {
+            currentLogs = [...manualLocalLogs, ...fetchedCloudLogs];
+            const tbody = document.getElementById('logs-body');
+            const emptyState = document.getElementById('empty-state');
+            const filterMachine = document.getElementById('filter-machine').value;
+            const filterTime = document.getElementById('filter-time').value;
+            const now = new Date();
+            
+            tbody.innerHTML = "";
+            let displayedCount = 0;
+
+            const sortedLogs = [...currentLogs].sort((a, b) => new Date(b.date_time) - new Date(a.date_time));
+
+            sortedLogs.forEach(log => {
+                const isPaid = checkedOutIds.includes(log.global_id);
+                if (filterMachine !== 'all' && log.machine_id !== filterMachine && !(filterMachine === 'Manual' && log.global_id.startsWith('Manual_'))) return;
+                
+                const logDate = new Date(log.date_time);
+                if (filterTime === 'today' && logDate.toDateString() !== now.toDateString()) return;
+                if (filterTime === 'hour' && (now - logDate) > 3600000) return;
+
+                displayedCount++;
+                let badgeClass = log.machine_id.includes('彩色') ? 'badge-fuji' : (log.global_id.startsWith('Manual_') ? 'badge-manual' : 'badge-ricoh');
+                let machineDisplayName = log.global_id.startsWith('Manual_') ? "手動前台" : log.machine_id;
+
+                const rowClass = isPaid ? 'status-paid' : '';
+                const btnHtml = isPaid ? `<span class="badge bg-light text-secondary border px-3 py-2"><i class="fa-solid fa-check me-1"></i>已結</span>` : `<button class="btn btn-checkout" onclick="playSound('info'); processCheckout(['${log.global_id}'])"><i class="fa-solid fa-calculator me-1"></i>結帳</button>`;
+
+                tbody.innerHTML += `
+                    <tr class="${rowClass}">
+                        <td class="text-center"><input class="form-check-input row-checkbox fs-5 shadow-none" type="checkbox" value="${log.global_id}" onclick="playSound('info')" ${isPaid ? 'disabled' : ''}></td>
+                        <td>${formatLocalTime(log.date_time)}</td>
+                        <td><span class="badge rounded-pill shadow-sm ${badgeClass}">${machineDisplayName}</span></td>
+                        <td>
+                            <div class="d-flex align-items-center gap-3">
+                                <div>${getFileIcon(log.file_name, log.global_id.startsWith('Manual_') ? 'Manual' : log.machine_id)}</div>
+                                <div class="text-truncate" style="max-width: 300px;">
+                                    <div class="fw-bold text-dark mb-1 text-truncate" style="font-size: 1.05rem;" title="${log.file_name}">${log.file_name}</div>
+                                    <div class="small text-secondary"><i class="fa-solid fa-user-tag me-1"></i>${log.user_name}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center"><span class="badge bg-light text-dark border fs-6 px-3 py-2 shadow-sm">${log.pages} 面</span></td>
+                        <td class="text-center">${isPaid ? '<span class="text-success fw-bold"><i class="fa-solid fa-check-double me-1"></i>完成</span>' : '<span class="text-warning fw-bold"><i class="fa-regular fa-clock me-1"></i>未結</span>'}</td>
+                        <td class="text-center">${btnHtml}</td>
+                    </tr>
+                `;
+            });
+
+            if (displayedCount === 0) emptyState.classList.remove('d-none');
+            else emptyState.classList.add('d-none');
+            document.getElementById('selectAll').checked = false;
+        }
+
+        function toggleSelectAll() {
+            const isChecked = document.getElementById('selectAll').checked;
+            document.querySelectorAll('.row-checkbox:not(:disabled)').forEach(cb => cb.checked = isChecked);
+        }
+
+        // ================= 6. 結帳與生成明細 =================
+        async function processBatchCheckout() {
+            const selected = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.value);
+            if (selected.length === 0) { playSound('warning'); Swal.fire('尚未選擇', '', 'warning'); return; }
+            playSound('info');
+            processCheckout(selected);
+        }
+
+        async function processCheckout(logIds) {
+            const targetLogs = currentLogs.filter(l => logIds.includes(l.global_id));
+            const transactionId = generateTransactionId();
+            const txTime = new Date().toISOString();
+            
+            let detailsHtml = ''; let totalAmount = 0; let totalPagesAll = 0;
+            let bwAmount = 0, colorAmount = 0; let txDetailsArray = [];
+            let mainMachine = targetLogs.length === 1 ? targetLogs[0].machine_id : '多機台混合';
+            let summaryNames = targetLogs.map(l => l.file_name).join(', ');
+
+            targetLogs.forEach(log => {
+                let color = 'BW', size = 'A4', copies = 1, pages = log.pages || 1, sides = 'Simplex';
+                if (log.config) {
+                    color = log.config.color || 'BW'; size = log.config.size || 'A4';
+                    copies = log.config.copies || 1; sides = log.config.sides || 'Simplex';
+                } else { color = log.machine_id.includes('彩色') ? 'COLOR' : 'BW'; }
+
+                let totalCalculatedPages = pages * copies;
+                totalPagesAll += totalCalculatedPages;
+                
+                let unitPrice = 0; let sizeColor = `${size}_${color}`;
+                if (sizeColor === "A4_BW") unitPrice = (totalCalculatedPages >= 20) ? priceConfig.a4_bw_disc : priceConfig.a4_bw;
+                else if (sizeColor === "B5_BW") unitPrice = priceConfig.b5_bw;
+                else if (sizeColor === "B4_BW") unitPrice = priceConfig.b4_bw;
+                else if (sizeColor === "A3_BW") unitPrice = priceConfig.a3_bw;
+                else if (sizeColor === "A4_COLOR") unitPrice = priceConfig.a4_color;
+                else if (sizeColor === "B5_COLOR") unitPrice = priceConfig.b5_color;
+                else if (sizeColor === "B4_COLOR") unitPrice = priceConfig.b4_color;
+                else if (sizeColor === "A3_COLOR") unitPrice = priceConfig.a3_color;
+
+                let subtotal = Math.ceil(totalCalculatedPages * unitPrice);
+                totalAmount += subtotal;
+                if(color === 'COLOR') colorAmount += subtotal; else bwAmount += subtotal;
+
+                let dt = new Date(log.date_time);
+                let timeStr = isNaN(dt) ? '' : `${String(dt.getMonth()+1).padStart(2,'0')}/${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+                let shortFile = log.file_name.length > 15 ? log.file_name.substring(0, 15) + '...' : log.file_name;
+
+                detailsHtml += `<tr><td class="text-secondary small text-nowrap">${timeStr}</td><td class="text-secondary small text-nowrap">${log.machine_id.includes('彩色')?'彩色機':'黑白機'}</td><td class="fw-bold text-truncate" style="max-width: 150px;" title="${log.file_name}">${shortFile}</td><td class="text-center">${totalCalculatedPages}</td><td class="text-end fw-bold text-primary">$${subtotal}</td></tr>`;
+
+                txDetailsArray.push({
+                    size: size, color: color === 'COLOR' ? '彩色' : '黑白', sides: sides === 'Duplex' ? '雙面' : '單面',
+                    pages: pages, copies: copies, totalPages: totalCalculatedPages, subtotal: subtotal
+                });
+            });
+
+            const { isConfirmed } = await Swal.fire({
+                title: '<i class="fa-solid fa-list-check text-primary me-2"></i>收銀明細確認', width: 700,
+                html: `<div class="table-responsive mb-3 border rounded shadow-sm"><table class="table table-sm table-hover align-middle text-start mb-0"><thead class="table-light"><tr><th>時間</th><th>機台</th><th>檔名</th><th class="text-center">面數</th><th class="text-end">小計</th></tr></thead><tbody>${detailsHtml}</tbody></table></div><div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border border-2 border-primary-subtle shadow-sm"><span class="fs-5 fw-bold text-secondary">總計</span><span class="display-5 fw-bold text-danger">$${totalAmount}</span></div>`,
+                showCancelButton: true, confirmButtonColor: '#1cc88a', cancelButtonColor: '#858796', confirmButtonText: '確認收銀', cancelButtonText: '取消'
+            });
+
+            if (!isConfirmed) return;
+            playSound('info');
+
+            const { value: payment, isConfirmed: paymentConfirmed } = await Swal.fire({
+                title: '結帳收銀',
+                html: `<div class="mb-3"><div class="text-secondary mb-1">應收金額</div><div class="display-6 fw-bold text-danger">$${totalAmount}</div></div><div class="form-group text-start"><label class="fw-bold text-secondary mb-2">顧客支付金額：</label><input id="customer-payment" type="number" class="form-control form-control-lg text-center fw-bold text-primary fs-3 shadow-none border-primary-subtle" value="${totalAmount}" min="${totalAmount}"></div>`,
+                showCancelButton: true, confirmButtonColor: '#4e73df', confirmButtonText: '計算找零', focusConfirm: false,
+                preConfirm: () => {
+                    const payVal = parseInt(document.getElementById('customer-payment').value);
+                    if (!payVal || payVal < totalAmount) { Swal.showValidationMessage('金額無效！'); playSound('error'); }
+                    return payVal;
+                }
+            });
+
+            if (!paymentConfirmed) return;
+            playSound('success');
+
+            const change = payment - totalAmount;
+            await Swal.fire({
+                title: '<i class="fa-regular fa-circle-check text-success me-2"></i>結帳完成',
+                html: `<div class="p-4 bg-light rounded-3 text-center border shadow-sm"><div class="row mb-3"><div class="col-6 border-end"><div class="text-secondary small mb-1">應收</div><div class="fs-4 fw-bold text-dark">$${totalAmount}</div></div><div class="col-6"><div class="text-secondary small mb-1">支付</div><div class="fs-4 fw-bold text-primary">$${payment}</div></div></div><hr class="text-secondary"><div class="mt-3"><div class="text-secondary fw-bold mb-1">應找零</div><div class="display-2 fw-black text-danger" style="font-weight: 900;">$${change}</div></div></div>`,
+                confirmButtonColor: '#1cc88a', confirmButtonText: '結束'
+            });
+
+            const newTransaction = {
+                tx_id: transactionId, date_time: txTime, summary: summaryNames.substring(0, 30) + (summaryNames.length > 30 ? '...' : ''),
+                total: totalAmount, bw_total: bwAmount, color_total: colorAmount, total_pages: totalPagesAll,
+                machine: mainMachine, status: '已結帳', details: txDetailsArray, ref_logs: logIds
+            };
+            executeCheckout(logIds, newTransaction);
+        }
+
+        async function executeCheckout(logIds, txData) {
+            checkedOutIds.push(...logIds);
+            localStorage.setItem('checkedOutIds', JSON.stringify(checkedOutIds));
+            renderTableUI();
+
+            const cloudIdsOnly = logIds.filter(id => !id.startsWith('Manual_'));
+            if (!IS_TEST_MODE) {
+                try {
+                    await fetch(GAS_URL, {
+                        method: 'POST', body: JSON.stringify({ action: 'checkout_transaction', ids: cloudIdsOnly, transaction_data: txData })
+                    });
+                } catch (err) {}
+            }
+        }
+
+        // ================= 7. 交易紀錄與退款功能 (即時向雲端抓取) =================
+        const txModal = new bootstrap.Modal(document.getElementById('transactionModal'));
+        const txDetailModal = new bootstrap.Modal(document.getElementById('txDetailModal'));
+
+        async function openTransactionModal() {
+            playSound('info');
+            txModal.show();
+            const tbody = document.getElementById('transaction-list-body');
+            
+            // 顯示載入動畫
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-secondary"><div class="spinner-border text-primary spinner-border-sm me-2"></div>從雲端同步歷史交易中...</td></tr>';
+            
+            try {
+                // 直接向 GAS 發出請求，抓取所有歷史交易
+                const response = await fetch(`${GAS_URL}?action=get_transactions`);
+                if (response.ok) {
+                    transactionHistory = await response.json();
+                }
+            } catch (err) {
+                console.error("抓取失敗", err);
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">雲端載入失敗，請檢查網路連線。</td></tr>';
+                return;
+            }
+            
+            renderTransactionList();
+        }
+
+        function renderTransactionList() {
+            const tbody = document.getElementById('transaction-list-body');
+            tbody.innerHTML = '';
+            
+            if (!transactionHistory || transactionHistory.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-secondary">暫無交易紀錄</td></tr>';
+                return;
+            }
+
+            transactionHistory.forEach(tx => {
+                const isCancelled = tx.status !== '已結帳';
+                const rowClass = isCancelled ? 'tx-status-cancelled' : '';
+                const badge = isCancelled ? '<span class="badge bg-secondary">已作廢</span>' : '<span class="badge bg-success">已結帳</span>';
+                
+                tbody.innerHTML += `
+                    <tr class="tx-row ${rowClass}" onclick="viewTransactionDetail('${tx.tx_id}')">
+                        <td class="ps-4 fw-bold text-primary">${tx.tx_id}</td>
+                        <td>${formatFullTime(tx.date_time)}</td>
+                        <td class="text-truncate" style="max-width: 200px;">${tx.summary}</td>
+                        <td>${tx.machine ? (tx.machine.includes('彩色')?'彩色機':'黑白機') : '其他'}</td>
+                        <td class="text-end fw-bold">$${tx.total}</td>
+                        <td class="text-center pe-4">${badge}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        function viewTransactionDetail(txId) {
+            playSound('info');
+            currentViewingTx = transactionHistory.find(t => t.tx_id === txId);
+            if (!currentViewingTx) return;
+
+            document.getElementById('detail-tx-id').innerText = currentViewingTx.tx_id;
+            document.getElementById('detail-total-amount').innerText = `$${currentViewingTx.total}`;
+            
+            const tbody = document.getElementById('tx-detail-body');
+            tbody.innerHTML = '';
+            
+            if (currentViewingTx.details && currentViewingTx.details.length > 0) {
+                currentViewingTx.details.forEach(d => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${d.size}</td><td>${d.color}</td><td>${d.sides}</td>
+                            <td class="text-center">${d.pages}</td><td class="text-center">${d.copies}</td>
+                            <td class="text-center">${d.totalPages}</td><td class="text-end fw-bold text-primary">$${d.subtotal}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                 tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-secondary">無詳細明細</td></tr>`;
+            }
+
+            const actionsDiv = document.getElementById('tx-actions');
+            const alertDiv = document.getElementById('tx-cancelled-alert');
+            
+            if (currentViewingTx.status === '已結帳') {
+                actionsDiv.classList.remove('d-none'); alertDiv.classList.add('d-none');
+            } else {
+                actionsDiv.classList.add('d-none'); alertDiv.classList.remove('d-none');
+                alertDiv.innerText = `此交易狀態：${currentViewingTx.status}`;
+            }
+
+            txModal.hide(); txDetailModal.show();
+            
+            document.getElementById('txDetailModal').addEventListener('hidden.bs.modal', function onHide() {
+                txModal.show(); document.getElementById('txDetailModal').removeEventListener('hidden.bs.modal', onHide);
+            });
+        }
+
+        async function cancelTransaction(isRefund) {
+            playSound('warning');
+            const actionText = isRefund ? '取消並退款 (直接刪除後端紀錄)' : '僅取消不退款 (註銷保留紀錄)';
+            const confirmColor = isRefund ? '#e74a3b' : '#f6c23e';
+            
+            const { isConfirmed } = await Swal.fire({
+                title: '確認作廢交易？', text: `您選擇的操作是：${actionText}`, icon: 'warning', showCancelButton: true, confirmButtonColor: confirmColor, confirmButtonText: '確認執行', cancelButtonText: '取消'
+            });
+
+            if (isConfirmed) {
+                playSound('success'); showLoading(true);
+
+                if(currentViewingTx.ref_logs) {
+                    currentViewingTx.ref_logs.forEach(id => {
+                        const idx = checkedOutIds.indexOf(id);
+                        if (idx > -1) checkedOutIds.splice(idx, 1);
+                    });
+                    localStorage.setItem('checkedOutIds', JSON.stringify(checkedOutIds));
+                }
+                
+                if (!IS_TEST_MODE) {
+                    try {
+                        await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({ action: 'cancel_transaction', tx_id: currentViewingTx.tx_id, refund: isRefund })
+                        });
+                    } catch(e) {}
+                }
+
+                showLoading(false);
+                txDetailModal.hide();
+                renderTableUI(); 
+                Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: '單據狀態已更新', showConfirmButton: false, timer: 2000 });
+                
+                // 退款後重新從雲端抓取最新的歷史紀錄
+                setTimeout(() => { openTransactionModal(); }, 500);
+            }
+        }
+
+        // ================= 8. 管理員後台 =================
+        async function openAdminPanel() {
+            playSound('info');
+            const { value: password } = await Swal.fire({ title: '管理員驗證', input: 'password', showCancelButton: true, confirmButtonColor: '#4e73df' });
+            if (password !== '5168') { if (password) { playSound('error'); Swal.fire('錯誤', '密碼不正確', 'error'); } return; }
+            playSound('info');
+
+            const { value: newPrices } = await Swal.fire({
+                title: '計價基數設定 (元/每面)',
+                html: `<div class="text-start" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;"><h6 class="fw-bold text-secondary mb-2">⚫ 黑白機台</h6><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">A4 (一般)</div><div class="col-6"><input id="p-a4bw" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.a4_bw}"></div></div><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">A4 (滿20面)</div><div class="col-6"><input id="p-a4bwd" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.a4_bw_disc}"></div></div><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">B5</div><div class="col-6"><input id="p-b5bw" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.b5_bw}"></div></div><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">B4</div><div class="col-6"><input id="p-b4bw" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.b4_bw}"></div></div><div class="row align-items-center mb-3"><div class="col-6 text-end fw-bold">A3</div><div class="col-6"><input id="p-a3bw" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.a3_bw}"></div></div><h6 class="fw-bold text-primary mb-2">🌈 彩色機台</h6><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">A4</div><div class="col-6"><input id="p-a4c" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.a4_color}"></div></div><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">B5</div><div class="col-6"><input id="p-b5c" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.b5_color}"></div></div><div class="row align-items-center mb-1"><div class="col-6 text-end fw-bold">B4</div><div class="col-6"><input id="p-b4c" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.b4_color}"></div></div><div class="row align-items-center mb-4"><div class="col-6 text-end fw-bold">A3</div><div class="col-6"><input id="p-a3c" type="number" step="0.1" class="form-control form-control-sm" value="${priceConfig.a3_color}"></div></div><hr><button class="btn btn-outline-danger w-100 fw-bold" onclick="clearCache()">清除「已結帳快取」與「本地紀錄」</button></div>`,
+                showCancelButton: true, confirmButtonText: '儲存', preConfirm: () => { return { a4_bw: parseFloat(document.getElementById('p-a4bw').value), a4_bw_disc: parseFloat(document.getElementById('p-a4bwd').value), b5_bw: parseFloat(document.getElementById('p-b5bw').value), b4_bw: parseFloat(document.getElementById('p-b4bw').value), a3_bw: parseFloat(document.getElementById('p-a3bw').value), a4_color: parseFloat(document.getElementById('p-a4c').value), b5_color: parseFloat(document.getElementById('p-b5c').value), b4_color: parseFloat(document.getElementById('p-b4c').value), a3_color: parseFloat(document.getElementById('p-a3c').value), } }
+            });
+
+            if (newPrices) {
+                playSound('success'); 
+                priceConfig = newPrices; localStorage.setItem('priceConfig', JSON.stringify(priceConfig));
+                Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: '價格已更新', showConfirmButton: false, timer: 2000 });
+            }
+        }
+
+        window.clearCache = function() {
+            playSound('warning'); 
+            Swal.fire({ title: '確定清除快取？', text: '這會解鎖所有已結帳單據，並刪除畫面上所有您手動新增的紀錄！', icon: 'warning', showCancelButton: true, confirmButtonColor: '#e74a3b', confirmButtonText: '強制清除'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    playSound('success'); checkedOutIds = []; localStorage.removeItem('checkedOutIds'); manualLocalLogs = []; localStorage.removeItem('manualLocalLogs');
+                    renderTableUI(); Swal.fire('清理完成', '系統已恢復初始狀態。', 'success');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
