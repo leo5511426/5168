@@ -215,7 +215,7 @@
         let currentLogs = []; 
         let checkedOutIds = JSON.parse(localStorage.getItem('checkedOutIds')) || [];
         
-        let transactionHistory = []; // 改為直接從雲端抓取
+        let transactionHistory = []; 
         let currentViewingTx = null;
 
         // ================= 2. 🔊 全域音效引擎 =================
@@ -294,18 +294,18 @@
                 title: '<i class="fa-solid fa-pen-to-square text-warning me-2"></i>手動新增前台項目',
                 html: `
                     <div class="text-start fs-6 p-1">
-                        <div class="mb-3"><label class="form-label fw-bold text-secondary">服務項目/檔名</label><input id="m-file" class="form-control" value="手動列印"></div>
+                        <div class="mb-3"><label class="form-label fw-bold text-secondary">服務項目/檔名</label><input id="m-file" class="form-control shadow-none" value="手動列印"></div>
                         <div class="row mb-3">
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">色彩</label><select id="m-color" class="form-select"><option value="BW" selected>⚫ 黑白</option><option value="COLOR">🌈 彩色</option></select></div>
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">尺寸</label><select id="m-size" class="form-select"><option value="A4" selected>A4</option><option value="B5">B5</option><option value="B4">B4</option><option value="A3">A3</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">色彩</label><select id="m-color" class="form-select shadow-none"><option value="BW" selected>⚫ 黑白</option><option value="COLOR">🌈 彩色</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">尺寸</label><select id="m-size" class="form-select shadow-none"><option value="A4" selected>A4</option><option value="B5">B5</option><option value="B4">B4</option><option value="A3">A3</option></select></div>
                         </div>
                         <div class="row mb-3">
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">排版</label><select id="m-sides" class="form-select"><option value="Simplex" selected>單面</option><option value="Duplex">雙面</option></select></div>
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">機台</label><select id="m-machine" class="form-select"><option value="Manual" selected>一般雜項</option><option value="黑白1(RICOH Aficio MP 7001)">黑白1</option><option value="黑白2(RICOH Aficio MP 7502)">黑白2</option><option value="彩色(ApeosPort-V C3376)">彩色機</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">排版</label><select id="m-sides" class="form-select shadow-none"><option value="Simplex" selected>單面</option><option value="Duplex">雙面</option></select></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">機台</label><select id="m-machine" class="form-select shadow-none"><option value="Manual" selected>一般雜項</option><option value="黑白1(RICOH Aficio MP 7001)">黑白1</option><option value="黑白2(RICOH Aficio MP 7502)">黑白2</option><option value="彩色(ApeosPort-V C3376)">彩色機</option></select></div>
                         </div>
                         <div class="row mb-2">
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">單份面數</label><input id="m-pages" type="number" class="form-control" value="1" min="1"></div>
-                            <div class="col-6"><label class="form-label fw-bold text-secondary">份數</label><input id="m-copies" type="number" class="form-control" value="1" min="1"></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">單份面數</label><input id="m-pages" type="number" class="form-control shadow-none" value="1" min="1"></div>
+                            <div class="col-6"><label class="form-label fw-bold text-secondary">份數</label><input id="m-copies" type="number" class="form-control shadow-none" value="1" min="1"></div>
                         </div>
                     </div>
                 `,
@@ -416,16 +416,109 @@
             document.querySelectorAll('.row-checkbox:not(:disabled)').forEach(cb => cb.checked = isChecked);
         }
 
-        // ================= 6. 結帳與生成明細 =================
+        // ================= 6. 結帳與生成明細 (加入人工確認步驟) =================
         async function processBatchCheckout() {
             const selected = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.value);
-            if (selected.length === 0) { playSound('warning'); Swal.fire('尚未選擇', '', 'warning'); return; }
+            if (selected.length === 0) { playSound('warning'); Swal.fire('尚未選擇', '請勾選要結帳的項目', 'warning'); return; }
             playSound('info');
             processCheckout(selected);
         }
 
         async function processCheckout(logIds) {
             const targetLogs = currentLogs.filter(l => logIds.includes(l.global_id));
+            if (targetLogs.length === 0) return;
+
+            // 步驟 1：人工確認尺寸、份數、面數
+            let configHtml = `
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm align-middle text-start mb-0">
+                        <thead class="table-light text-secondary" style="position: sticky; top: 0; z-index: 1;">
+                            <tr>
+                                <th>檔案名稱</th>
+                                <th style="width: 80px;">單份面數</th>
+                                <th style="width: 80px;">列印份數</th>
+                                <th style="width: 90px;">紙張尺寸</th>
+                                <th style="width: 90px;">色彩</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            targetLogs.forEach((log, index) => {
+                let defColor = log.machine_id.includes('彩色') ? 'COLOR' : 'BW';
+                let defSize = 'A4';
+                let defCopies = 1;
+                let defSides = 'Simplex';
+                let defPages = log.pages || 1;
+
+                // 如果是手動輸入的項目，讀取既有設定
+                if (log.config) {
+                    defColor = log.config.color;
+                    defSize = log.config.size;
+                    defCopies = log.config.copies;
+                    defSides = log.config.sides;
+                    defPages = log.pages;
+                }
+
+                let shortFile = log.file_name.length > 15 ? log.file_name.substring(0, 15) + '...' : log.file_name;
+
+                configHtml += `
+                    <tr id="row-${index}">
+                        <td class="text-truncate fw-bold text-dark" title="${log.file_name}" style="max-width: 150px;">${shortFile}</td>
+                        <td><input type="number" class="form-control form-control-sm px-1 text-center conf-pages fw-bold text-primary shadow-none" value="${defPages}" min="1"></td>
+                        <td><input type="number" class="form-control form-control-sm px-1 text-center conf-copies fw-bold text-primary shadow-none" value="${defCopies}" min="1"></td>
+                        <td>
+                            <select class="form-select form-select-sm px-1 conf-size shadow-none">
+                                <option value="A4" ${defSize==='A4'?'selected':''}>A4</option>
+                                <option value="B5" ${defSize==='B5'?'selected':''}>B5</option>
+                                <option value="B4" ${defSize==='B4'?'selected':''}>B4</option>
+                                <option value="A3" ${defSize==='A3'?'selected':''}>A3</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm px-1 conf-color shadow-none">
+                                <option value="BW" ${defColor==='BW'?'selected':''}>黑白</option>
+                                <option value="COLOR" ${defColor==='COLOR'?'selected':''}>彩色</option>
+                            </select>
+                            <input type="hidden" class="conf-sides" value="${defSides}">
+                        </td>
+                    </tr>
+                `;
+            });
+            configHtml += `</tbody></table></div>`;
+
+            // 顯示人工確認視窗
+            const { isConfirmed: configConfirmed, value: confirmedSettings } = await Swal.fire({
+                title: '<i class="fa-solid fa-sliders text-primary me-2"></i>確認列印設定',
+                width: 750,
+                html: configHtml,
+                showCancelButton: true,
+                confirmButtonColor: '#4e73df',
+                cancelButtonColor: '#858796',
+                confirmButtonText: '下一步：計算金額 <i class="fa-solid fa-arrow-right ms-1"></i>',
+                cancelButtonText: '取消',
+                focusConfirm: false,
+                preConfirm: () => {
+                    const results = [];
+                    targetLogs.forEach((log, index) => {
+                        const row = document.getElementById(`row-${index}`);
+                        results.push({
+                            log: log,
+                            pages: parseInt(row.querySelector('.conf-pages').value) || 1,
+                            copies: parseInt(row.querySelector('.conf-copies').value) || 1,
+                            size: row.querySelector('.conf-size').value,
+                            color: row.querySelector('.conf-color').value,
+                            sides: row.querySelector('.conf-sides').value
+                        });
+                    });
+                    return results;
+                }
+            });
+
+            if (!configConfirmed || !confirmedSettings) return;
+            playSound('info');
+
+            // 步驟 2：利用剛才確認的設定計算總額
             const transactionId = generateTransactionId();
             const txTime = new Date().toISOString();
             
@@ -434,17 +527,12 @@
             let mainMachine = targetLogs.length === 1 ? targetLogs[0].machine_id : '多機台混合';
             let summaryNames = targetLogs.map(l => l.file_name).join(', ');
 
-            targetLogs.forEach(log => {
-                let color = 'BW', size = 'A4', copies = 1, pages = log.pages || 1, sides = 'Simplex';
-                if (log.config) {
-                    color = log.config.color || 'BW'; size = log.config.size || 'A4';
-                    copies = log.config.copies || 1; sides = log.config.sides || 'Simplex';
-                } else { color = log.machine_id.includes('彩色') ? 'COLOR' : 'BW'; }
-
-                let totalCalculatedPages = pages * copies;
+            confirmedSettings.forEach(item => {
+                const log = item.log;
+                let totalCalculatedPages = item.pages * item.copies;
                 totalPagesAll += totalCalculatedPages;
                 
-                let unitPrice = 0; let sizeColor = `${size}_${color}`;
+                let unitPrice = 0; let sizeColor = `${item.size}_${item.color}`;
                 if (sizeColor === "A4_BW") unitPrice = (totalCalculatedPages >= 20) ? priceConfig.a4_bw_disc : priceConfig.a4_bw;
                 else if (sizeColor === "B5_BW") unitPrice = priceConfig.b5_bw;
                 else if (sizeColor === "B4_BW") unitPrice = priceConfig.b4_bw;
@@ -456,36 +544,45 @@
 
                 let subtotal = Math.ceil(totalCalculatedPages * unitPrice);
                 totalAmount += subtotal;
-                if(color === 'COLOR') colorAmount += subtotal; else bwAmount += subtotal;
+                if(item.color === 'COLOR') colorAmount += subtotal; else bwAmount += subtotal;
 
                 let dt = new Date(log.date_time);
                 let timeStr = isNaN(dt) ? '' : `${String(dt.getMonth()+1).padStart(2,'0')}/${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
                 let shortFile = log.file_name.length > 15 ? log.file_name.substring(0, 15) + '...' : log.file_name;
+                let machineName = log.machine_id.includes('彩色')?'彩色機': (log.global_id.startsWith('Manual_')?'手動前台':'黑白機');
 
-                detailsHtml += `<tr><td class="text-secondary small text-nowrap">${timeStr}</td><td class="text-secondary small text-nowrap">${log.machine_id.includes('彩色')?'彩色機':'黑白機'}</td><td class="fw-bold text-truncate" style="max-width: 150px;" title="${log.file_name}">${shortFile}</td><td class="text-center">${totalCalculatedPages}</td><td class="text-end fw-bold text-primary">$${subtotal}</td></tr>`;
+                detailsHtml += `<tr>
+                    <td class="text-secondary small text-nowrap">${timeStr}</td>
+                    <td class="text-secondary small text-nowrap">${machineName}</td>
+                    <td class="fw-bold text-truncate" style="max-width: 150px;" title="${log.file_name}">${shortFile}</td>
+                    <td class="text-center fw-bold text-dark">${item.size}</td>
+                    <td class="text-center">${totalCalculatedPages}</td>
+                    <td class="text-end fw-bold text-primary">$${subtotal}</td>
+                </tr>`;
 
                 txDetailsArray.push({
-                    size: size, color: color === 'COLOR' ? '彩色' : '黑白', sides: sides === 'Duplex' ? '雙面' : '單面',
-                    pages: pages, copies: copies, totalPages: totalCalculatedPages, subtotal: subtotal
+                    size: item.size, color: item.color === 'COLOR' ? '彩色' : '黑白', sides: item.sides === 'Duplex' ? '雙面' : '單面',
+                    pages: item.pages, copies: item.copies, totalPages: totalCalculatedPages, subtotal: subtotal
                 });
             });
 
-            const { isConfirmed } = await Swal.fire({
-                title: '<i class="fa-solid fa-list-check text-primary me-2"></i>收銀明細確認', width: 700,
-                html: `<div class="table-responsive mb-3 border rounded shadow-sm"><table class="table table-sm table-hover align-middle text-start mb-0"><thead class="table-light"><tr><th>時間</th><th>機台</th><th>檔名</th><th class="text-center">面數</th><th class="text-end">小計</th></tr></thead><tbody>${detailsHtml}</tbody></table></div><div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border border-2 border-primary-subtle shadow-sm"><span class="fs-5 fw-bold text-secondary">總計</span><span class="display-5 fw-bold text-danger">$${totalAmount}</span></div>`,
-                showCancelButton: true, confirmButtonColor: '#1cc88a', cancelButtonColor: '#858796', confirmButtonText: '確認收銀', cancelButtonText: '取消'
+            const { isConfirmed: summaryConfirmed } = await Swal.fire({
+                title: '<i class="fa-solid fa-list-check text-primary me-2"></i>收銀明細確認', width: 750,
+                html: `<div class="table-responsive mb-3 border rounded shadow-sm"><table class="table table-sm table-hover align-middle text-start mb-0"><thead class="table-light"><tr><th>時間</th><th>機台</th><th>檔名</th><th class="text-center">尺寸</th><th class="text-center">面數</th><th class="text-end">小計</th></tr></thead><tbody>${detailsHtml}</tbody></table></div><div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border border-2 border-primary-subtle shadow-sm"><span class="fs-5 fw-bold text-secondary">總計</span><span class="display-5 fw-bold text-danger">$${totalAmount}</span></div>`,
+                showCancelButton: true, confirmButtonColor: '#1cc88a', cancelButtonColor: '#858796', confirmButtonText: '<i class="fa-solid fa-cash-register me-1"></i> 確認收銀', cancelButtonText: '取消'
             });
 
-            if (!isConfirmed) return;
+            if (!summaryConfirmed) return;
             playSound('info');
 
+            // 步驟 3：輸入支付金額與找零
             const { value: payment, isConfirmed: paymentConfirmed } = await Swal.fire({
                 title: '結帳收銀',
                 html: `<div class="mb-3"><div class="text-secondary mb-1">應收金額</div><div class="display-6 fw-bold text-danger">$${totalAmount}</div></div><div class="form-group text-start"><label class="fw-bold text-secondary mb-2">顧客支付金額：</label><input id="customer-payment" type="number" class="form-control form-control-lg text-center fw-bold text-primary fs-3 shadow-none border-primary-subtle" value="${totalAmount}" min="${totalAmount}"></div>`,
                 showCancelButton: true, confirmButtonColor: '#4e73df', confirmButtonText: '計算找零', focusConfirm: false,
                 preConfirm: () => {
                     const payVal = parseInt(document.getElementById('customer-payment').value);
-                    if (!payVal || payVal < totalAmount) { Swal.showValidationMessage('金額無效！'); playSound('error'); }
+                    if (!payVal || payVal < totalAmount) { Swal.showValidationMessage('金額無效或不足！'); playSound('error'); }
                     return payVal;
                 }
             });
