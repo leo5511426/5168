@@ -88,6 +88,12 @@
                     </select>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    <label class="form-label fw-bold mb-0 text-secondary"><i class="fa-solid fa-desktop me-1"></i>電腦</label>
+                    <select id="filter-computer" class="form-select form-select-sm shadow-none border-secondary-subtle fw-bold text-dark" style="width: 140px;" onchange="playSound('info'); renderTableUI();">
+                        <option value="all">所有電腦</option>
+                    </select>
+                </div>
+                <div class="d-flex align-items-center gap-2">
                     <label class="form-label fw-bold mb-0 text-secondary"><i class="fa-solid fa-filter me-1"></i>時間</label>
                     <select id="filter-time" class="form-select form-select-sm shadow-none border-secondary-subtle fw-bold text-dark" style="width: 140px;" onchange="playSound('info'); renderTableUI();">
                         <option value="all">所有紀錄</option>
@@ -410,6 +416,12 @@
             const tbody = document.getElementById('logs-body');
             const emptyState = document.getElementById('empty-state');
             const filterMachine = document.getElementById('filter-machine').value;
+            const filterComputerEl = document.getElementById('filter-computer');
+            const previousComputerFilter = filterComputerEl.value;
+            const computerNames = [...new Set(currentLogs.map(log => getComputerDisplayName(log.user_name)))].sort((a, b) => a.localeCompare(b, 'zh-Hant', { numeric: true }));
+            filterComputerEl.innerHTML = '<option value="all">所有電腦</option>' + computerNames.map(name => `<option value="${name}">${name}</option>`).join('');
+            filterComputerEl.value = computerNames.includes(previousComputerFilter) ? previousComputerFilter : 'all';
+            const filterComputer = filterComputerEl.value;
             const filterTime = document.getElementById('filter-time').value;
             const now = new Date();
             
@@ -421,6 +433,7 @@
             sortedLogs.forEach(log => {
                 const isPaid = checkedOutIds.includes(log.global_id);
                 if (filterMachine !== 'all' && log.machine_id !== filterMachine && !(filterMachine === 'Manual' && log.global_id.startsWith('Manual_'))) return;
+                if (filterComputer !== 'all' && getComputerDisplayName(log.user_name) !== filterComputer) return;
                 
                 const logDate = new Date(log.date_time);
                 if (filterTime === 'today' && logDate.toDateString() !== now.toDateString()) return;
