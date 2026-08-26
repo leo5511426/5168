@@ -33,6 +33,21 @@
         .tx-row { cursor: pointer; transition: background 0.2s; }
         .tx-row:hover { background-color: #e2e8f0 !important; }
         .tx-status-cancelled { text-decoration: line-through; color: #999; }
+
+        /* 🖥️ 使用者名稱（電腦）彩色彩帶樣式 */
+        .badge-computer {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            color: #fff;
+            background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
+            box-shadow: 0 2px 5px rgba(37, 117, 252, 0.35);
+            letter-spacing: 0.5px;
+        }
     </style>
 </head>
 <body>
@@ -287,6 +302,39 @@
             return 'TX' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0') + String(now.getSeconds()).padStart(2,'0') + Math.floor(Math.random()*100);
         }
 
+        // 🖥️ 店內電腦代號對照表（機台上傳的原始使用者名稱 → 客人電腦顯示名稱）
+        // ⚠️ 區分大小寫，請務必跟印表機驅動程式裡設定的「使用者名稱」完全一致
+        const COMPUTER_NAME_MAP = {
+            "USRE": "電腦1",
+            "pc": "電腦2",
+            "USER": "電腦3"
+        };
+
+        // 取得顯示用的電腦名稱：對照表裡有找到就轉換，找不到則原樣顯示原始代號（避免資料被吃掉）
+        function getComputerDisplayName(rawName) {
+            const key = String(rawName || '');
+            return COMPUTER_NAME_MAP.hasOwnProperty(key) ? COMPUTER_NAME_MAP[key] : (key || '未知');
+        }
+
+        // 🖥️ 依「使用者名稱（電腦）」文字產生固定但不同的漸層色，方便肉眼快速分辨是哪台電腦
+        function getComputerBadgeColor(name) {
+            const palettes = [
+                ['#6a11cb', '#2575fc'], // 紫→藍
+                ['#f857a6', '#ff5858'], // 桃紅→紅
+                ['#11998e', '#38ef7d'], // 深綠→亮綠
+                ['#fc4a1a', '#f7b733'], // 橘紅→橘黃
+                ['#0575e6', '#00f260'], // 藍→綠
+                ['#8e2de2', '#4a00e0'], // 紫
+                ['#ee9ca7', '#ffdde1'], // 粉
+                ['#232526', '#414345'], // 深灰
+            ];
+            let hash = 0;
+            const str = String(name || '');
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            const idx = Math.abs(hash) % palettes.length;
+            return palettes[idx];
+        }
+
         // ================= 4. 手動新增 =================
         async function manualAddLog() {
             playSound('info'); 
@@ -385,6 +433,10 @@
                 const rowClass = isPaid ? 'status-paid' : '';
                 const btnHtml = isPaid ? `<span class="badge bg-light text-secondary border px-3 py-2"><i class="fa-solid fa-check me-1"></i>已結</span>` : `<button class="btn btn-checkout" onclick="playSound('info'); processCheckout(['${log.global_id}'])"><i class="fa-solid fa-calculator me-1"></i>結帳</button>`;
 
+                const [colorStart, colorEnd] = getComputerBadgeColor(log.user_name);
+                const computerDisplayName = getComputerDisplayName(log.user_name);
+                const computerBadgeHtml = `<span class="badge-computer" style="background: linear-gradient(90deg, ${colorStart} 0%, ${colorEnd} 100%);"><i class="fa-solid fa-desktop"></i>${computerDisplayName}</span>`;
+
                 tbody.innerHTML += `
                     <tr class="${rowClass}">
                         <td class="text-center"><input class="form-check-input row-checkbox fs-5 shadow-none" type="checkbox" value="${log.global_id}" onclick="playSound('info')" ${isPaid ? 'disabled' : ''}></td>
@@ -395,7 +447,7 @@
                                 <div>${getFileIcon(log.file_name, log.global_id.startsWith('Manual_') ? 'Manual' : log.machine_id)}</div>
                                 <div class="text-truncate" style="max-width: 300px;">
                                     <div class="fw-bold text-dark mb-1 text-truncate" style="font-size: 1.05rem;" title="${log.file_name}">${log.file_name}</div>
-                                    <div class="small text-secondary"><i class="fa-solid fa-user-tag me-1"></i>${log.user_name}</div>
+                                    <div class="mt-1">${computerBadgeHtml}</div>
                                 </div>
                             </div>
                         </td>
