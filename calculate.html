@@ -20,7 +20,7 @@
         .table-custom thead th { background-color: #f8f9fc; color: var(--secondary); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px; border-bottom: 2px solid #e3e6f0; padding: 15px; }
         .table-custom tbody td { padding: 15px; vertical-align: middle; border-bottom: 1px solid #edf2f9; }
         .table-custom tbody tr:hover { background-color: #f1f8ff; }
-        .status-paid { opacity: 0.6; background-color: #f8f9fa !important; pointer-events: none; }
+        .status-paid { opacity: 0.72; background-color: #f8f9fa !important; }
         .status-paid td { text-decoration: line-through; color: #999; }
         .badge-ricoh { background-color: #5a5c69; font-size: 0.85rem; padding: 6px 10px; }
         .badge-fuji { background-color: #4e73df; font-size: 0.85rem; padding: 6px 10px; }
@@ -33,6 +33,11 @@
         .tx-row { cursor: pointer; transition: background 0.2s; }
         .tx-row:hover { background-color: #e2e8f0 !important; }
         .tx-status-cancelled { text-decoration: line-through; color: #999; }
+        .btn-full-filename { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+        .filename-wrap { min-width: 0; }
+        .paper-total-card { min-width: 92px; background: #fff; border: 1px solid #dfe3ea; border-radius: 10px; padding: 8px 12px; text-align: center; }
+        .paper-total-card .paper-size { font-size: 0.78rem; color: #6c757d; font-weight: 700; }
+        .paper-total-card .paper-count { font-size: 1.15rem; font-weight: 900; color: #212529; }
 
         /* 🖥️ 使用者名稱（電腦）彩色彩帶樣式 */
         .badge-computer {
@@ -186,12 +191,16 @@
                         <table class="table table-sm table-striped align-middle text-start mb-0">
                             <thead class="table-light">
                                 <tr>
+                                    <th>檔案名稱</th>
+                                    <th>來源機器</th>
+                                    <th>來源電腦</th>
                                     <th>紙張尺寸</th>
                                     <th>色彩類型</th>
                                     <th>單雙面</th>
-                                    <th class="text-center">單份頁數</th>
+                                    <th class="text-center">單份面數</th>
                                     <th class="text-center">列印份數</th>
                                     <th class="text-center">總面數</th>
+                                    <th class="text-center">實際張數</th>
                                     <th class="text-end">小計金額</th>
                                 </tr>
                             </thead>
@@ -200,8 +209,18 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="bg-light p-3 rounded border shadow-sm mb-3">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                            <span class="fw-bold text-secondary"><i class="fa-solid fa-layer-group me-1"></i>尺寸總計張數</span>
+                            <span class="small text-muted">雙面列印依「每份 2 面 = 1 張」，奇數面向上取整</span>
+                        </div>
+                        <div id="detail-paper-size-totals" class="d-flex flex-wrap gap-2"></div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border shadow-sm mb-4">
-                        <span class="fs-5 fw-bold text-secondary">總計金額</span>
+                        <div>
+                            <span class="fs-5 fw-bold text-secondary">總計金額</span>
+                            <div class="small text-muted">總實際用紙：<span id="detail-total-sheets" class="fw-bold">0</span> 張</div>
+                        </div>
                         <span class="display-6 fw-bold text-danger" id="detail-total-amount"></span>
                     </div>
                     
@@ -278,6 +297,93 @@
         };
 
         function showLoading(show) { document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; }
+
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function buildFullFileNameButton(fileName, compact = false) {
+            const encoded = encodeURIComponent(String(fileName ?? '')).replace(/'/g, '%27');
+            const label = compact
+                ? '<i class="fa-solid fa-up-right-from-square"></i>'
+                : '<i class="fa-solid fa-up-right-from-square me-1"></i>檢視完整檔案名稱';
+            return `<button type="button" class="btn btn-outline-secondary btn-full-filename mt-1" title="檢視完整檔案名稱" onclick="event.stopPropagation(); showFullFileName(decodeURIComponent('${encoded}'))">${label}</button>`;
+        }
+
+        function showFullFileName(fileName, extraNote = '') {
+            playSound('info');
+            const name = String(fileName || '無資料');
+            Swal.fire({
+                title: '<i class="fa-solid fa-file-lines text-primary me-2"></i>完整檔案名稱',
+                html: `<div class="text-start bg-light border rounded p-3 fw-bold" style="word-break: break-all; user-select: text;">${escapeHtml(name)}</div>${extraNote ? `<div class="small text-muted text-start mt-2">${escapeHtml(extraNote)}</div>` : ''}`,
+                confirmButtonColor: '#4e73df',
+                confirmButtonText: '關閉'
+            });
+        }
+
+        function getMachineDisplayName(machineId) {
+            const raw = String(machineId || '');
+            if (!raw) return '無資料';
+            if (raw === 'Manual') return '手動前台';
+            if (raw === '多機台混合') return '多機台混合';
+            if (raw.includes('彩色')) return '彩色機';
+            if (raw.includes('黑白1')) return '黑白1';
+            if (raw.includes('黑白2')) return '黑白2';
+            return raw;
+        }
+
+        function calculatePhysicalSheets(pages, copies, sides) {
+            const p = Math.max(1, parseInt(pages) || 1);
+            const c = Math.max(1, parseInt(copies) || 1);
+            return sides === 'Duplex' || sides === '雙面' ? Math.ceil(p / 2) * c : p * c;
+        }
+
+        function buildPaperSizeTotalsHtml(sizeTotals) {
+            const totals = sizeTotals || {};
+            const preferredOrder = ['A4', 'B5', 'B4', 'A3'];
+            const keys = [...new Set([...preferredOrder, ...Object.keys(totals)])].filter(k => Number(totals[k] || 0) > 0);
+            if (keys.length === 0) return '<span class="text-muted small">無資料</span>';
+            return keys.map(size => `
+                <div class="paper-total-card">
+                    <div class="paper-size">${escapeHtml(size)}</div>
+                    <div class="paper-count">${Number(totals[size] || 0)} 張</div>
+                </div>
+            `).join('');
+        }
+
+        function getTransactionFileNames(tx) {
+            if (!tx) return [];
+            if (Array.isArray(tx.file_names) && tx.file_names.length) return tx.file_names.filter(Boolean).map(String);
+            if (Array.isArray(tx.details)) {
+                const names = tx.details.map(d => d && (d.file_name || d.fileName)).filter(Boolean).map(String);
+                if (names.length) return names;
+            }
+            return [];
+        }
+
+        function showTransactionFileNames(txId) {
+            const tx = transactionHistory.find(t => t.tx_id === txId);
+            if (!tx) return;
+            const names = getTransactionFileNames(tx);
+            if (names.length === 0) {
+                showFullFileName(tx.summary || '無資料', '此筆為舊交易，系統當時未保存完整檔案名稱；目前只能顯示既有摘要。');
+                return;
+            }
+            const html = names.map((name, i) => `<div class="text-start bg-light border rounded p-2 mb-2" style="word-break: break-all;"><span class="text-secondary me-2">${i + 1}.</span><span class="fw-bold">${escapeHtml(name)}</span></div>`).join('');
+            Swal.fire({
+                title: '<i class="fa-solid fa-files text-primary me-2"></i>完整檔案名稱',
+                html,
+                width: 700,
+                confirmButtonColor: '#4e73df',
+                confirmButtonText: '關閉'
+            });
+        }
 
         function getFileIcon(filename, machine) {
             if (machine === "Manual") return '<i class="fa-solid fa-pen-to-square icon-manual fs-4"></i>';
@@ -458,9 +564,9 @@
                         <td>
                             <div class="d-flex align-items-center gap-3">
                                 <div>${getFileIcon(log.file_name, log.global_id.startsWith('Manual_') ? 'Manual' : log.machine_id)}</div>
-                                <div class="text-truncate" style="max-width: 300px;">
-                                    <div class="fw-bold text-dark mb-1 text-truncate" style="font-size: 1.05rem;" title="${log.file_name}">${log.file_name}</div>
-                                    <div class="mt-1">${computerBadgeHtml}</div>
+                                <div class="filename-wrap" style="max-width: 300px;">
+                                    <div class="fw-bold text-dark mb-1 text-truncate" style="font-size: 1.05rem;" title="${escapeHtml(log.file_name)}">${escapeHtml(log.file_name)}</div>
+                                    <div class="d-flex align-items-center flex-wrap gap-1 mt-1">${computerBadgeHtml}${buildFullFileNameButton(log.file_name)}</div>
                                 </div>
                             </div>
                         </td>
@@ -504,6 +610,7 @@
                                 <th style="width: 80px;">列印份數</th>
                                 <th style="width: 90px;">紙張尺寸</th>
                                 <th style="width: 90px;">色彩</th>
+                                <th style="width: 95px;">單雙面</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -529,7 +636,10 @@
 
                 configHtml += `
                     <tr id="row-${index}">
-                        <td class="text-truncate fw-bold text-dark" title="${log.file_name}" style="max-width: 150px;">${shortFile}</td>
+                        <td style="max-width: 180px;">
+                            <div class="text-truncate fw-bold text-dark" title="${escapeHtml(log.file_name)}">${escapeHtml(shortFile)}</div>
+                            ${buildFullFileNameButton(log.file_name)}
+                        </td>
                         <td><input type="number" class="form-control form-control-sm px-1 text-center conf-pages fw-bold text-primary shadow-none" value="${defPages}" min="1"></td>
                         <td><input type="number" class="form-control form-control-sm px-1 text-center conf-copies fw-bold text-primary shadow-none" value="${defCopies}" min="1"></td>
                         <td>
@@ -545,7 +655,12 @@
                                 <option value="BW" ${defColor==='BW'?'selected':''}>黑白</option>
                                 <option value="COLOR" ${defColor==='COLOR'?'selected':''}>彩色</option>
                             </select>
-                            <input type="hidden" class="conf-sides" value="${defSides}">
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm px-1 conf-sides shadow-none fw-bold">
+                                <option value="Simplex" ${defSides==='Simplex'?'selected':''}>單面</option>
+                                <option value="Duplex" ${defSides==='Duplex'?'selected':''}>雙面</option>
+                            </select>
                         </td>
                     </tr>
                 `;
@@ -587,15 +702,18 @@
             const transactionId = generateTransactionId();
             const txTime = new Date().toISOString();
             
-            let detailsHtml = ''; let totalAmount = 0; let totalPagesAll = 0;
-            let bwAmount = 0, colorAmount = 0; let txDetailsArray = [];
+            let detailsHtml = ''; let totalAmount = 0; let totalPagesAll = 0; let totalSheetsAll = 0;
+            let bwAmount = 0, colorAmount = 0; let txDetailsArray = []; let paperSizeTotals = {};
             let mainMachine = targetLogs.length === 1 ? targetLogs[0].machine_id : '多機台混合';
             let summaryNames = targetLogs.map(l => l.file_name).join(', ');
 
             confirmedSettings.forEach(item => {
                 const log = item.log;
                 let totalCalculatedPages = item.pages * item.copies;
+                let actualSheets = calculatePhysicalSheets(item.pages, item.copies, item.sides);
                 totalPagesAll += totalCalculatedPages;
+                totalSheetsAll += actualSheets;
+                paperSizeTotals[item.size] = (paperSizeTotals[item.size] || 0) + actualSheets;
                 
                 let unitPrice = 0; let sizeColor = `${item.size}_${item.color}`;
                 if (sizeColor === "A4_BW") unitPrice = (totalCalculatedPages >= 20) ? priceConfig.a4_bw_disc : priceConfig.a4_bw;
@@ -618,22 +736,32 @@
 
                 detailsHtml += `<tr>
                     <td class="text-secondary small text-nowrap">${timeStr}</td>
-                    <td class="text-secondary small text-nowrap">${machineName}</td>
-                    <td class="fw-bold text-truncate" style="max-width: 150px;" title="${log.file_name}">${shortFile}</td>
-                    <td class="text-center fw-bold text-dark">${item.size}</td>
+                    <td class="text-secondary small text-nowrap" title="${escapeHtml(log.machine_id)}">${escapeHtml(machineName)}</td>
+                    <td style="max-width: 180px;">
+                        <div class="fw-bold text-truncate" title="${escapeHtml(log.file_name)}">${escapeHtml(shortFile)}</div>
+                        ${buildFullFileNameButton(log.file_name)}
+                    </td>
+                    <td class="text-center fw-bold text-dark">${escapeHtml(item.size)}</td>
+                    <td class="text-center">${item.sides === 'Duplex' ? '雙面' : '單面'}</td>
                     <td class="text-center">${totalCalculatedPages}</td>
+                    <td class="text-center fw-bold text-success">${actualSheets}</td>
                     <td class="text-end fw-bold text-primary">$${subtotal}</td>
                 </tr>`;
 
                 txDetailsArray.push({
+                    global_id: log.global_id || '',
+                    file_name: log.file_name || '無資料',
+                    machine_id: log.machine_id || '無資料',
+                    source_computer: getComputerDisplayName(log.user_name),
+                    source_user_name: log.user_name || '無資料',
                     size: item.size, color: item.color === 'COLOR' ? '彩色' : '黑白', sides: item.sides === 'Duplex' ? '雙面' : '單面',
-                    pages: item.pages, copies: item.copies, totalPages: totalCalculatedPages, subtotal: subtotal
+                    pages: item.pages, copies: item.copies, totalPages: totalCalculatedPages, actualSheets: actualSheets, subtotal: subtotal
                 });
             });
 
             const { isConfirmed: summaryConfirmed } = await Swal.fire({
                 title: '<i class="fa-solid fa-list-check text-primary me-2"></i>收銀明細確認', width: 750,
-                html: `<div class="table-responsive mb-3 border rounded shadow-sm"><table class="table table-sm table-hover align-middle text-start mb-0"><thead class="table-light"><tr><th>時間</th><th>機台</th><th>檔名</th><th class="text-center">尺寸</th><th class="text-center">面數</th><th class="text-end">小計</th></tr></thead><tbody>${detailsHtml}</tbody></table></div><div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border border-2 border-primary-subtle shadow-sm"><span class="fs-5 fw-bold text-secondary">總計</span><span class="display-5 fw-bold text-danger">$${totalAmount}</span></div>`,
+                html: `<div class="table-responsive mb-3 border rounded shadow-sm"><table class="table table-sm table-hover align-middle text-start mb-0"><thead class="table-light"><tr><th>時間</th><th>機台</th><th>檔名</th><th class="text-center">尺寸</th><th class="text-center">單雙面</th><th class="text-center">總面數</th><th class="text-center">實際張數</th><th class="text-end">小計</th></tr></thead><tbody>${detailsHtml}</tbody></table></div><div class="bg-light border rounded p-3 mb-3"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"><span class="fw-bold text-secondary"><i class="fa-solid fa-layer-group me-1"></i>尺寸總計張數</span><span class="small text-muted">雙面：每份 2 面 = 1 張，奇數面向上取整</span></div><div class="d-flex flex-wrap gap-2">${buildPaperSizeTotalsHtml(paperSizeTotals)}</div></div><div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border border-2 border-primary-subtle shadow-sm"><div><span class="fs-5 fw-bold text-secondary">總計</span><div class="small text-muted">總面數 ${totalPagesAll} 面｜實際用紙 ${totalSheetsAll} 張</div></div><span class="display-5 fw-bold text-danger">$${totalAmount}</span></div>`,
                 showCancelButton: true, confirmButtonColor: '#1cc88a', cancelButtonColor: '#858796', confirmButtonText: '<i class="fa-solid fa-cash-register me-1"></i> 確認收銀', cancelButtonText: '取消'
             });
 
@@ -658,13 +786,14 @@
             const change = payment - totalAmount;
             await Swal.fire({
                 title: '<i class="fa-regular fa-circle-check text-success me-2"></i>結帳完成',
-                html: `<div class="p-4 bg-light rounded-3 text-center border shadow-sm"><div class="row mb-3"><div class="col-6 border-end"><div class="text-secondary small mb-1">應收</div><div class="fs-4 fw-bold text-dark">$${totalAmount}</div></div><div class="col-6"><div class="text-secondary small mb-1">支付</div><div class="fs-4 fw-bold text-primary">$${payment}</div></div></div><hr class="text-secondary"><div class="mt-3"><div class="text-secondary fw-bold mb-1">應找零</div><div class="display-2 fw-black text-danger" style="font-weight: 900;">$${change}</div></div></div>`,
+                html: `<div class="p-4 bg-light rounded-3 text-center border shadow-sm"><div class="row mb-3"><div class="col-6 border-end"><div class="text-secondary small mb-1">應收</div><div class="fs-4 fw-bold text-dark">$${totalAmount}</div></div><div class="col-6"><div class="text-secondary small mb-1">支付</div><div class="fs-4 fw-bold text-primary">$${payment}</div></div></div><div class="small text-muted mb-2">本交易：${totalPagesAll} 面｜實際用紙 ${totalSheetsAll} 張</div><hr class="text-secondary"><div class="mt-3"><div class="text-secondary fw-bold mb-1">應找零</div><div class="display-2 fw-black text-danger" style="font-weight: 900;">$${change}</div></div></div>`,
                 confirmButtonColor: '#1cc88a', confirmButtonText: '結束'
             });
 
             const newTransaction = {
                 tx_id: transactionId, date_time: txTime, summary: summaryNames.substring(0, 30) + (summaryNames.length > 30 ? '...' : ''),
-                total: totalAmount, bw_total: bwAmount, color_total: colorAmount, total_pages: totalPagesAll,
+                total: totalAmount, bw_total: bwAmount, color_total: colorAmount, total_pages: totalPagesAll, total_sheets: totalSheetsAll,
+                paper_size_totals: paperSizeTotals, file_names: targetLogs.map(l => l.file_name || '無資料'),
                 machine: mainMachine, status: '已結帳', details: txDetailsArray, ref_logs: logIds
             };
             executeCheckout(logIds, newTransaction);
@@ -730,8 +859,11 @@
                     <tr class="tx-row ${rowClass}" onclick="viewTransactionDetail('${tx.tx_id}')">
                         <td class="ps-4 fw-bold text-primary">${tx.tx_id}</td>
                         <td>${formatFullTime(tx.date_time)}</td>
-                        <td class="text-truncate" style="max-width: 200px;">${tx.summary}</td>
-                        <td>${tx.machine ? (tx.machine.includes('彩色')?'彩色機':'黑白機') : '其他'}</td>
+                        <td style="max-width: 240px;">
+                            <div class="text-truncate" title="${escapeHtml(tx.summary || '')}">${escapeHtml(tx.summary || '無資料')}</div>
+                            <button type="button" class="btn btn-outline-secondary btn-full-filename mt-1" onclick="event.stopPropagation(); showTransactionFileNames('${tx.tx_id}')"><i class="fa-solid fa-up-right-from-square me-1"></i>檢視完整檔案名稱</button>
+                        </td>
+                        <td>${escapeHtml(getMachineDisplayName(tx.machine))}</td>
                         <td class="text-end fw-bold">$${tx.total}</td>
                         <td class="text-center pe-4">${badge}</td>
                     </tr>
@@ -750,19 +882,45 @@
             const tbody = document.getElementById('tx-detail-body');
             tbody.innerHTML = '';
             
+            let derivedPaperTotals = {};
+            let derivedTotalSheets = 0;
             if (currentViewingTx.details && currentViewingTx.details.length > 0) {
                 currentViewingTx.details.forEach(d => {
+                    const fileName = d.file_name || d.fileName || '無資料';
+                    const sourceMachine = d.machine_id || d.source_machine || d.machine || '無資料';
+                    const sourceComputer = d.source_computer || d.computer || '無資料';
+                    const pages = parseInt(d.pages) || 0;
+                    const copies = parseInt(d.copies) || 0;
+                    const totalPages = Number(d.totalPages ?? d.total_pages ?? (pages * copies)) || 0;
+                    const hasStoredActualSheets = (d.actualSheets !== undefined && d.actualSheets !== null) || (d.actual_sheets !== undefined && d.actual_sheets !== null);
+                    const actualSheets = hasStoredActualSheets ? Number(d.actualSheets ?? d.actual_sheets) : (pages && copies ? calculatePhysicalSheets(pages, copies, d.sides) : 0);
+                    const size = d.size || '無資料';
+                    if (actualSheets > 0 && size !== '無資料') derivedPaperTotals[size] = (derivedPaperTotals[size] || 0) + actualSheets;
+                    derivedTotalSheets += actualSheets;
+
                     tbody.innerHTML += `
                         <tr>
-                            <td>${d.size}</td><td>${d.color}</td><td>${d.sides}</td>
-                            <td class="text-center">${d.pages}</td><td class="text-center">${d.copies}</td>
-                            <td class="text-center">${d.totalPages}</td><td class="text-end fw-bold text-primary">$${d.subtotal}</td>
+                            <td style="min-width: 175px;">
+                                <div class="fw-bold text-truncate" style="max-width: 190px;" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
+                                ${buildFullFileNameButton(fileName)}
+                            </td>
+                            <td class="small" title="${escapeHtml(sourceMachine)}">${escapeHtml(getMachineDisplayName(sourceMachine))}</td>
+                            <td class="small">${escapeHtml(sourceComputer)}</td>
+                            <td>${escapeHtml(size)}</td><td>${escapeHtml(d.color || '無資料')}</td><td>${escapeHtml(d.sides || '無資料')}</td>
+                            <td class="text-center">${pages || '無資料'}</td><td class="text-center">${copies || '無資料'}</td>
+                            <td class="text-center">${totalPages || '無資料'}</td><td class="text-center fw-bold text-success">${actualSheets || '無資料'}</td><td class="text-end fw-bold text-primary">$${Number(d.subtotal || 0)}</td>
                         </tr>
                     `;
                 });
             } else {
-                 tbody.innerHTML = `<tr><td colspan="7" class="text-center py-2 text-secondary">無詳細明細</td></tr>`;
+                 tbody.innerHTML = `<tr><td colspan="11" class="text-center py-2 text-secondary">無詳細明細</td></tr>`;
             }
+
+            const storedPaperTotals = currentViewingTx.paper_size_totals && typeof currentViewingTx.paper_size_totals === 'object' ? currentViewingTx.paper_size_totals : null;
+            const finalPaperTotals = storedPaperTotals || derivedPaperTotals;
+            const finalTotalSheets = (currentViewingTx.total_sheets !== undefined && currentViewingTx.total_sheets !== null) ? Number(currentViewingTx.total_sheets) : derivedTotalSheets;
+            document.getElementById('detail-paper-size-totals').innerHTML = buildPaperSizeTotalsHtml(finalPaperTotals);
+            document.getElementById('detail-total-sheets').innerText = finalTotalSheets || 0;
 
             const actionsDiv = document.getElementById('tx-actions');
             const alertDiv = document.getElementById('tx-cancelled-alert');
